@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-apk:
@@ -42,6 +42,17 @@ jobs:
 
       - name: Build debug APK
         run: npm run android:apk
+
+      - name: Publish downloadable APK release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="mfa-1-apk-${GITHUB_SHA:0:7}"
+          gh release create "$tag" android/app/build/outputs/apk/debug/app-debug.apk \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "MFA 1 – الجزء الأول (Android APK)" \
+            --notes "Debug APK generated from branch ${GITHUB_REF_NAME} at commit ${GITHUB_SHA}. This development build is unsigned for store publishing; Android may ask before installing."
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
