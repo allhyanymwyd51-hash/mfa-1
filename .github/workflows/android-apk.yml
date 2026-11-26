@@ -31,7 +31,18 @@ jobs:
         run: sdkmanager "platforms;android-34" "build-tools;34.0.0" "ndk;26.1.10909125" "cmake;3.22.1"
 
       - name: Build native C++ APK
-        run: cd android && ./gradlew --no-daemon assembleDebug
+        shell: bash
+        run: |
+          set +e
+          (cd android && ./gradlew --no-daemon assembleDebug) > "$RUNNER_TEMP/native-build.log" 2>&1
+          result=$?
+          cat "$RUNNER_TEMP/native-build.log"
+          if [ "$result" -ne 0 ]; then
+            tail -n 45 "$RUNNER_TEMP/native-build.log" >> "$GITHUB_STEP_SUMMARY"
+            detail=$(tail -n 20 "$RUNNER_TEMP/native-build.log" | tr '\n' ' ' | sed 's/%/%25/g; s/\r/%0D/g')
+            echo "::error title=Native APK build log::$detail"
+            exit "$result"
+          fi
 
       - name: Publish APK download
         env:
