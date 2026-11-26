@@ -39,7 +39,8 @@ jobs:
           cat "$RUNNER_TEMP/native-build.log"
           if [ "$result" -ne 0 ]; then
             tail -n 45 "$RUNNER_TEMP/native-build.log" >> "$GITHUB_STEP_SUMMARY"
-            detail=$(tail -n 20 "$RUNNER_TEMP/native-build.log" | tr '\n' ' ' | sed 's/%/%25/g; s/\r/%0D/g')
+            detail=$(grep -E 'error:|fatal error:|CMake Error|ninja: error|FAILED:' "$RUNNER_TEMP/native-build.log" | tail -n 8 | tr '\n' ' ' | sed 's/%/%25/g; s/\r/%0D/g')
+            if [ -z "$detail" ]; then detail=$(tail -n 12 "$RUNNER_TEMP/native-build.log" | tr '\n' ' '); fi
             echo "::error title=Native APK build log::$detail"
             exit "$result"
           fi
