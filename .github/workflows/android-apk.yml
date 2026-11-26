@@ -1,4 +1,4 @@
-name: Build Android APK
+name: Build native C++ MFA 1 APK
 
 on:
   push:
@@ -16,48 +16,38 @@ jobs:
       - name: Checkout project
         uses: actions/checkout@v5
 
-      - name: Set up Java
+      - name: Set up Java for Gradle
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version: '20'
-          cache: npm
-
-      - name: Set up Android SDK
+      - name: Set up Android SDK tools
         uses: android-actions/setup-android@v3
         with:
-          # The legacy "tools" SDK package was removed; platform-tools is sufficient.
           packages: 'platform-tools'
 
-      - name: Install Android build platform
-        run: sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+      - name: Install SDK, NDK and CMake
+        run: sdkmanager "platforms;android-34" "build-tools;34.0.0" "ndk;26.1.10909125" "cmake;3.22.1"
 
-      - name: Install web dependencies
-        run: npm ci
+      - name: Build native C++ APK
+        run: cd android && ./gradlew --no-daemon assembleDebug
 
-      - name: Build debug APK
-        run: npm run android:apk
-
-      - name: Publish downloadable APK release
+      - name: Publish APK download
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          tag="mfa-1-apk-${GITHUB_SHA:0:7}"
+          tag="mfa-1-native-${GITHUB_SHA:0:7}"
           gh release create "$tag" android/app/build/outputs/apk/debug/app-debug.apk \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
-            --title "MFA 1 – الجزء الأول (Android APK)" \
-            --notes "Debug APK generated from branch ${GITHUB_REF_NAME} at commit ${GITHUB_SHA}. This development build is unsigned for store publishing; Android may ask before installing."
+            --title "MFA 1 — Native C++ Android" \
+            --notes "Native C++ OpenGL ES build from ${GITHUB_REF_NAME} at ${GITHUB_SHA}; debug build for device testing."
 
-      - name: Upload APK artifact
+      - name: Save APK as workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mfa-1-debug-apk
+          name: mfa-1-native-debug-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
