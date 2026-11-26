@@ -94,7 +94,9 @@ class NativeGame {
     GLuint a=shader(GL_VERTEX_SHADER,vs),b=shader(GL_FRAGMENT_SHADER,fs);program=glCreateProgram();glAttachShader(program,a);glAttachShader(program,b);glLinkProgram(program);glDeleteShader(a);glDeleteShader(b);GLint linked=0;glGetProgramiv(program,GL_LINK_STATUS,&linked);if(!linked)return false;
     posLoc=glGetAttribLocation(program,"aPos");colorLoc=glGetAttribLocation(program,"aColor");mvpLoc=glGetUniformLocation(program,"uMvp");pointLoc=glGetUniformLocation(program,"uPoint");
     glGenBuffers(1,&cityBuffer);glGenBuffers(1,&detailBuffer);glGenBuffers(1,&frameBuffer);
-    if(cityVerts.empty())buildWorld();upload(cityBuffer,cityVerts,GL_STATIC_DRAW);upload(detailBuffer,pointVerts,GL_STATIC_DRAW);
+    if(cityVerts.empty())buildWorld();
+    upload(cityBuffer,cityVerts,GL_STATIC_DRAW);
+    upload(detailBuffer,pointVerts,GL_STATIC_DRAW);
     glEnable(GL_DEPTH_TEST);glDisable(GL_CULL_FACE);glEnable(GL_BLEND);glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
     ready=true;LOGI("Native MFA C++ renderer ready; points=%d",kDetailPoints);return true;
   }
@@ -176,7 +178,7 @@ class NativeGame {
     int b=nearestDoor();if(b>=0&&!pendingEnter){insideBuilding=b;const auto&shop=buildings[b];exteriorReturn={shop.x,0,shop.z+shop.d*.5f+3.f};doorAnim=0;pendingEnter=true;return;}
   }
   void inputEvent(AInputEvent*e){
-    if(AInputEvent_getType(e)==AINPUT_EVENT_TYPE_KEY){int key=AKeyEvent_getKeyCode(e);bool down=AKeyEvent_getAction(e)==AKEY_EVENT_ACTION_DOWN;switch(key){case AKEYCODE_W:case AKEYCODE_UP:keyForward=down;break;case AKEYCODE_S:case AKEYCODE_DOWN:keyBack=down;break;case AKEYCODE_A:case AKEYCODE_LEFT:keyLeft=down;break;case AKEYCODE_D:case AKEYCODE_RIGHT:keyRight=down;break;case AKEYCODE_SHIFT_LEFT:case AKEYCODE_SHIFT_RIGHT:keyRun=down;break;case AKEYCODE_SPACE:keyJump=down;if(down)jumpRequested=true;break;case AKEYCODE_E:if(down)interact();break;case AKEYCODE_BACK:if(down){if(room)interact();else ANativeActivity_finish(app->activity);}break;}return;}
+    if(AInputEvent_getType(e)==AINPUT_EVENT_TYPE_KEY){int key=AKeyEvent_getKeyCode(e);bool down=AKeyEvent_getAction(e)==AKEY_EVENT_ACTION_DOWN;switch(key){case AKEYCODE_W:case AKEYCODE_DPAD_UP:keyForward=down;break;case AKEYCODE_S:case AKEYCODE_DPAD_DOWN:keyBack=down;break;case AKEYCODE_A:case AKEYCODE_DPAD_LEFT:keyLeft=down;break;case AKEYCODE_D:case AKEYCODE_DPAD_RIGHT:keyRight=down;break;case AKEYCODE_SHIFT_LEFT:case AKEYCODE_SHIFT_RIGHT:keyRun=down;break;case AKEYCODE_SPACE:keyJump=down;if(down)jumpRequested=true;break;case AKEYCODE_E:if(down)interact();break;case AKEYCODE_BACK:if(down){if(room)interact();else ANativeActivity_finish(app->activity);}break;}return;}
     if(AInputEvent_getType(e)!=AINPUT_EVENT_TYPE_MOTION)return;
     int action=AMotionEvent_getAction(e),masked=action&AMOTION_EVENT_ACTION_MASK,index=(action&AMOTION_EVENT_ACTION_POINTER_INDEX_MASK)>>AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT;int id=AMotionEvent_getPointerId(e,index);float x=AMotionEvent_getX(e,index),y=AMotionEvent_getY(e,index),w=std::max(1,width),h=std::max(1,height);
     if(masked==AMOTION_EVENT_ACTION_DOWN||masked==AMOTION_EVENT_ACTION_POINTER_DOWN){float jx=w*.18f,jy=h*.78f;if(x<w*.43f&&y>h*.52f){joyId=id;joyActive=true;joyX=(x-jx)/(w*.14f);joyY=(y-jy)/(h*.14f);}
@@ -240,4 +242,4 @@ static void androidCommand(android_app*a,int32_t cmd){auto*g=static_cast<NativeG
 static int androidInput(android_app*a,AInputEvent*e){auto*g=static_cast<NativeGame*>(a->userData);return g?([&](){g->inputEvent(e);return 1;})():0;}
 }
 
-extern "C" void android_main(android_app* app){app_dummy();NativeGame game;game.app=app;app->userData=&game;app->onAppCmd=androidCommand;app->onInputEvent=androidInput;ANativeActivity_setWindowFlags(app->activity,AWINDOW_FLAG_FULLSCREEN,AWINDOW_FLAG_FULLSCREEN);auto previous=std::chrono::steady_clock::now();while(!app->destroyRequested){int events=0;android_poll_source*source=nullptr;int timeout=(game.ready&&game.focused)?0:-1;int ident=ALooper_pollOnce(timeout,nullptr,&events,reinterpret_cast<void**>(&source));if(ident>=0&&source)source->process(app,source);if(app->destroyRequested)break;if(game.ready&&game.focused){auto now=std::chrono::steady_clock::now();float dt=std::chrono::duration<float>(now-previous).count();previous=now;game.update(dt);game.render();}}game.loseGL();}
+extern "C" void android_main(android_app* app){app_dummy();NativeGame game;game.app=app;app->userData=&game;app->onAppCmd=androidCommand;app->onInputEvent=androidInput;auto previous=std::chrono::steady_clock::now();while(!app->destroyRequested){int events=0;android_poll_source*source=nullptr;int timeout=(game.ready&&game.focused)?0:-1;int ident=ALooper_pollOnce(timeout,nullptr,&events,reinterpret_cast<void**>(&source));if(ident>=0&&source)source->process(app,source);if(app->destroyRequested)break;if(game.ready&&game.focused){auto now=std::chrono::steady_clock::now();float dt=std::chrono::duration<float>(now-previous).count();previous=now;game.update(dt);game.render();}}game.loseGL();}
