@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.18)
+project(mfa_native_core LANGUAGES CXX)
+add_library(mfa_native_core STATIC src/game_core.cpp)
+target_compile_features(mfa_native_core PUBLIC cxx_std_17)
+target_include_directories(mfa_native_core PUBLIC include)

@@ -1,0 +1,6 @@
+{
+  "appId": "com.mfa1.game",
+  "appName": "MFA 1 - الجزء الأول",
+  "webDir": "dist",
+  "android": { "backgroundColor": "#0a0e14" }
+}

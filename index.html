@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>MFA 1 | الجزء الأول - عالم سعودي مفتوح</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { width:100%; height:100%; overflow:hidden; background:#0a0e14; font-family:'Segoe UI',Tahoma,Arial,sans-serif; }
+  #game { position:fixed; inset:0; }
+  canvas { display:block; }
+
+  /* ===== شاشة التحميل ===== */
+  #loading {
+    position:fixed; inset:0; z-index:100; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; gap:18px;
+    background:radial-gradient(ellipse at center, #1a2b3c 0%, #0a0e14 70%);
+    color:#fff; transition:opacity .6s;
+  }
+  #loading.hide { opacity:0; pointer-events:none; }
+  #loading .logo { font-size:clamp(48px,10vw,96px); font-weight:900; letter-spacing:4px;
+    background:linear-gradient(135deg,#ffd700,#ff8c00,#ffd700); -webkit-background-clip:text; background-clip:text; color:transparent;
+    text-shadow:0 0 60px rgba(255,180,0,.3); }
+  #loading .sub { font-size:clamp(14px,3vw,22px); color:#9fb4c8; letter-spacing:2px; }
+  #loading .bar-wrap { width:min(420px,80vw); height:10px; background:#1e2a38; border-radius:6px; overflow:hidden; border:1px solid #2e4256; }
+  #loading .bar { height:100%; width:0%; background:linear-gradient(90deg,#ffd700,#ff8c00); border-radius:6px; transition:width .3s; }
+  #loading .tip { font-size:13px; color:#5f7488; max-width:80vw; text-align:center; line-height:1.8; }
+
+  /* ===== واجهة اللعب ===== */
+  #hud { position:fixed; inset:0; pointer-events:none; z-index:10; display:none; }
+  #hud.on { display:block; }
+
+  .panel { background:rgba(10,16,24,.72); backdrop-filter:blur(8px); border:1px solid rgba(255,215,0,.25);
+    border-radius:12px; color:#fff; }
+
+  /* الصحة والجوع والفلوس */
+  #stats { position:absolute; top:14px; right:14px; padding:12px 16px; min-width:210px; pointer-events:none; }
+  #stats .row { display:flex; align-items:center; gap:8px; margin:5px 0; font-size:13px; }
+  #stats .bar { flex:1; height:9px; background:#1c2836; border-radius:5px; overflow:hidden; }
+  #stats .fill { height:100%; border-radius:5px; transition:width .4s; }
+  #hpFill { background:linear-gradient(90deg,#ff4757,#ff6b81); }
+  #hungerFill { background:linear-gradient(90deg,#ffa502,#eccc68); }
+  #money { font-size:20px; font-weight:800; color:#2ed573; margin-top:6px; }
+  #wanted { font-size:15px; letter-spacing:2px; color:#ffd700; min-height:20px; }
+
+  /* الخريطة المصغرة */
+  #minimap { position:absolute; top:14px; left:14px; width:170px; height:170px; border-radius:50%;
+    border:3px solid rgba(255,215,0,.5); overflow:hidden; background:#0d1520; box-shadow:0 4px 20px rgba(0,0,0,.6); }
+  #minimap canvas { width:100%; height:100%; }
+
+  /* المهمة الحالية */
+  #mission { position:absolute; top:200px; right:14px; max-width:300px; padding:12px 16px; }
+  #mission h3 { color:#ffd700; font-size:15px; margin-bottom:5px; }
+  #mission p { font-size:13px; line-height:1.7; color:#dfe8f0; }
+  #mission .dist { color:#2ed573; font-weight:700; }
+
+  /* التنبيهات */
+  #toast { position:absolute; bottom:120px; left:50%; transform:translateX(-50%); padding:10px 22px;
+    font-size:15px; font-weight:700; opacity:0; transition:opacity .3s; white-space:nowrap; }
+  #toast.show { opacity:1; }
+
+  /* التفاعل */
+  #interact { position:absolute; bottom:170px; left:50%; transform:translateX(-50%); padding:9px 20px;
+    font-size:14px; font-weight:700; display:none; pointer-events:none; }
+  #interact.on { display:block; }
+  #interact b { color:#ffd700; }
+
+  /* الحوار */
+  #dialog { position:absolute; bottom:24px; left:50%; transform:translateX(-50%); width:min(620px,92vw);
+    padding:16px 20px; display:none; pointer-events:auto; }
+  #dialog.on { display:block; }
+  #dialog .who { color:#ffd700; font-weight:800; font-size:15px; margin-bottom:6px; }
+  #dialog .text { font-size:15px; line-height:1.8; color:#eef4fa; min-height:48px; }
+  #dialog .opts { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
+  #dialog .opt { padding:7px 16px; border-radius:8px; background:rgba(255,215,0,.12); border:1px solid rgba(255,215,0,.4);
+    color:#ffd700; cursor:pointer; font-size:13px; font-weight:700; }
+  #dialog .opt:hover { background:rgba(255,215,0,.3); }
+
+  /* القائمة الرئيسية */
+  #menu { position:fixed; inset:0; z-index:50; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    background:linear-gradient(180deg, rgba(6,10,16,.55) 0%, rgba(6,10,16,.88) 100%); color:#fff; }
+  #menu h1 { font-size:clamp(52px,12vw,110px); font-weight:900; letter-spacing:6px;
+    background:linear-gradient(135deg,#ffd700,#ff8c00,#ffd700); -webkit-background-clip:text; background-clip:text; color:transparent; }
+  #menu .tag { font-size:clamp(15px,3.5vw,24px); color:#cfe0ee; margin:6px 0 4px; letter-spacing:3px; }
+  #menu .ver { color:#7d93a8; font-size:13px; margin-bottom:26px; }
+  #menu .btn { pointer-events:auto; width:min(320px,84vw); padding:15px; margin:6px 0; font-size:18px; font-weight:800;
+    border-radius:12px; border:1px solid rgba(255,215,0,.5); background:linear-gradient(135deg,rgba(255,180,0,.18),rgba(255,140,0,.1));
+    color:#ffd700; cursor:pointer; transition:.2s; font-family:inherit; }
+  #menu .btn:hover { background:rgba(255,180,0,.35); transform:scale(1.03); }
+  #menu .btn.primary { background:linear-gradient(135deg,#ffd700,#ff8c00); color:#1a1200; }
+  #menu .controls { margin-top:22px; font-size:12.5px; color:#8fa6ba; line-height:2; text-align:center; }
+  #menu .controls b { color:#ffd700; }
+
+  /* المتجر */
+  #shop { position:fixed; inset:0; z-index:60; display:none; align-items:center; justify-content:center; background:rgba(4,8,12,.7); }
+  #shop.on { display:flex; }
+  #shop .box { width:min(560px,94vw); max-height:86vh; overflow:auto; padding:22px; }
+  #shop h2 { color:#ffd700; margin-bottom:4px; }
+  #shop .sub { color:#9fb4c8; font-size:13px; margin-bottom:14px; }
+  #shop .item { display:flex; justify-content:space-between; align-items:center; padding:11px 13px; margin:7px 0;
+    background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.1); border-radius:10px; }
+  #shop .item .nm { font-weight:700; font-size:15px; }
+  #shop .item .ds { font-size:12px; color:#9fb4c8; margin-top:2px; }
+  #shop .buy { padding:8px 18px; border-radius:8px; border:none; background:linear-gradient(135deg,#ffd700,#ff8c00);
+    color:#1a1200; font-weight:800; cursor:pointer; font-family:inherit; }
+  #shop .close { margin-top:12px; width:100%; padding:11px; border-radius:10px; background:#243447; color:#fff; border:none;
+    font-weight:700; cursor:pointer; font-family:inherit; }
+
+  /* أزرار الجوال */
+  #touch { position:fixed; inset:0; z-index:20; pointer-events:none; display:none; }
+  #touch.on { display:block; }
+  #joy { position:absolute; bottom:26px; right:26px; width:120px; height:120px; border-radius:50%;
+    background:rgba(255,255,255,.07); border:2px solid rgba(255,255,255,.25); pointer-events:auto; }
+  #joyKnob { position:absolute; top:50%; left:50%; width:52px; height:52px; border-radius:50%;
+    background:rgba(255,215,0,.55); transform:translate(-50%,-50%); }
+  .tbtn { position:absolute; width:58px; height:58px; border-radius:50%; background:rgba(255,255,255,.1);
+    border:2px solid rgba(255,255,255,.3); color:#fff; font-size:11px; font-weight:800; display:flex;
+    align-items:center; justify-content:center; pointer-events:auto; user-select:none; }
+  .tbtn:active { background:rgba(255,215,0,.5); }
+  #btnJump { bottom:160px; right:36px; }
+  #btnRun { bottom:100px; right:150px; }
+  #btnAct { bottom:36px; right:160px; background:rgba(255,215,0,.3); border-color:#ffd700; color:#ffd700; }
+  #btnCam { bottom:230px; right:30px; }
+  #btnMap { top:196px; left:14px; width:46px; height:46px; }
+
+  #fps { position:absolute; bottom:10px; left:12px; font-size:11px; color:rgba(255,255,255,.45); }
+
+  @media (max-width:700px) {
+    #minimap { width:110px; height:110px; }
+    #mission { top:140px; max-width:220px; font-size:12px; }
+    #stats { min-width:160px; padding:8px 11px; }
+  }
+</style>
+</head>
+<body>
+
+<div id="game"></div>
+
+<!-- شاشة التحميل -->
+<div id="loading">
+  <div class="logo">MFA 1</div>
+  <div class="sub">الجزء الأول — عالم سعودي مفتوح</div>
+  <div class="bar-wrap"><div class="bar" id="loadBar"></div></div>
+  <div class="tip" id="loadTip">جاري بناء المدينة... 🏙️</div>
+</div>
+
+<!-- القائمة الرئيسية -->
+<div id="menu" style="display:none">
+  <h1>MFA 1</h1>
+  <div class="tag">🇸🇦 الجزء الأول — عالم سعودي مفتوح 🇸🇦</div>
+  <div class="ver">مدينة 768×768م • 144 مبنى • 120,000 نقطة تفاصيل • سيارات • مهام • وظائف</div>
+  <button class="btn primary" id="btnStart">▶ ابدأ اللعب</button>
+  <button class="btn" id="btnHow">📖 طريقة اللعب</button>
+  <button class="btn" id="btnNew">🔄 مدينة جديدة</button>
+  <div class="controls" id="howText" style="display:none">
+    <b>WASD / الأسهم</b> للحركة • <b>Shift</b> للركض • <b>مسافة</b> للقفز<br>
+    <b>E</b> للتفاعل (فتح الأبواب، دخول المحلات، ركوب السيارة)<br>
+    <b>الماوس</b> لتدوير الكاميرا • <b>عجلة الماوس</b> للتقريب<br>
+    على الجوال: عصا التحكم والأزرار على الشاشة
+  </div>
+</div>
+
+<!-- واجهة اللعب -->
+<div id="hud">
+  <div id="stats" class="panel">
+    <div class="row">❤️ الصحة <div class="bar"><div class="fill" id="hpFill" style="width:100%"></div></div></div>
+    <div class="row">🍽️ الشبع <div class="bar"><div class="fill" id="hungerFill" style="width:100%"></div></div></div>
+    <div id="money">💰 500 ريال</div>
+    <div id="wanted"></div>
+  </div>
+  <div id="minimap"><canvas id="mapCanvas" width="340" height="340"></canvas></div>
+  <div id="mission" class="panel"><h3 id="mTitle">🎯 مهمة</h3><p id="mText"></p></div>
+  <div id="toast" class="panel"></div>
+  <div id="interact" class="panel"></div>
+  <div id="dialog" class="panel">
+    <div class="who" id="dWho"></div>
+    <div class="text" id="dText"></div>
+    <div class="opts" id="dOpts"></div>
+  </div>
+  <div id="fps"></div>
+</div>
+
+<!-- المتجر -->
+<div id="shop">
+  <div class="box panel">
+    <h2 id="shopTitle">🏪 المتجر</h2>
+    <div class="sub" id="shopSub"></div>
+    <div id="shopItems"></div>
+    <button class="close" id="shopClose">إغلاق (Esc)</button>
+  </div>
+</div>
+
+<!-- أزرار الجوال -->
+<div id="touch">
+  <div id="joy"><div id="joyKnob"></div></div>
+  <div class="tbtn" id="btnJump">قفز</div>
+  <div class="tbtn" id="btnRun">ركض</div>
+  <div class="tbtn" id="btnAct">تفاعل</div>
+  <div class="tbtn" id="btnCam">كاميرا</div>
+  <div class="tbtn" id="btnMap">🗺️</div>
+</div>
+
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>
