@@ -30,7 +30,7 @@ constexpr char kLog[] = "MFA_NATIVE";
 constexpr float kPi = 3.1415926535f;
 constexpr float kCity = 768.0f;
 constexpr int kBlocks = 12;
-constexpr int kDetailPoints = 120000;
+constexpr int kDetailPoints = 6000;
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, kLog, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, kLog, __VA_ARGS__)
 
@@ -123,7 +123,7 @@ class NativeGame {
     constexpr int atlasSize=1024,cell=64,columns=16;std::vector<uint32_t>codepoints;for(uint32_t c=32;c<=126;c++)codepoints.push_back(c);for(uint32_t c=0xFE70;c<=0xFEFF;c++)codepoints.push_back(c);for(uint32_t c=0x0660;c<=0x0669;c++)codepoints.push_back(c);codepoints.push_back(0x060C);codepoints.push_back(0x061B);codepoints.push_back(0x061F);codepoints.push_back(0x066A);
     fontAtlas.assign(atlasSize*atlasSize,0);fontAtlas[0]=255;fontScale=stbtt_ScaleForPixelHeight(&fontInfo,42.f);int slot=0;
     for(uint32_t cp:codepoints){int w=0,h=0,xoff=0,yoff=0;unsigned char*bitmap=stbtt_GetCodepointBitmap(&fontInfo,fontScale,fontScale,static_cast<int>(cp),&w,&h,&xoff,&yoff);int advance=0,lsb=0;stbtt_GetCodepointHMetrics(&fontInfo,static_cast<int>(cp),&advance,&lsb);Glyph g;g.advance=advance*fontScale;g.width=w;g.height=h;g.xoff=xoff;g.yoff=yoff;
-      int ox=(slot%columns)*cell+4,oy=(slot/columns)*cell+4;if(bitmap&&w>0&&h>0&&ox+w<atlasSize&&oy+h<atlasSize){for(int y=0;y<h;y++)std::memcpy(fontAtlas.data()+(oy+y)*atlasSize+ox,bitmap+y*w,w);g.u0=static_cast<float>(ox)/atlasSize;g.u1=static_cast<float>(ox+w)/atlasSize;g.v0=1.f-static_cast<float>(oy)/atlasSize;g.v1=1.f-static_cast<float>(oy+h)/atlasSize;}
+      int ox=(slot%columns)*cell+4,oy=(slot/columns)*cell+4;if(bitmap&&w>0&&h>0&&ox+w<atlasSize&&oy+h<atlasSize){for(int y=0;y<h;y++)std::memcpy(fontAtlas.data()+(oy+y)*atlasSize+ox,bitmap+y*w,w);g.u0=static_cast<float>(ox)/atlasSize;g.u1=static_cast<float>(ox+w)/atlasSize;g.v0=static_cast<float>(oy)/atlasSize;g.v1=static_cast<float>(oy+h)/atlasSize;}
       if(bitmap)stbtt_FreeBitmap(bitmap,nullptr);
       glyphs[cp]=g;slot++;}
     glGenTextures(1,&fontTexture);glBindTexture(GL_TEXTURE_2D,fontTexture);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);glPixelStorei(GL_UNPACK_ALIGNMENT,1);glTexImage2D(GL_TEXTURE_2D,0,GL_ALPHA,atlasSize,atlasSize,0,GL_ALPHA,GL_UNSIGNED_BYTE,fontAtlas.data());fontReady=true;LOGI("Arabic font atlas ready, glyphs=%zu",glyphs.size());
@@ -230,8 +230,8 @@ class NativeGame {
       trash.push_back({x,z,true});
     }
     // Exactly 120,000 visible surface detail points, one GL_POINTS draw call.
-    pointVerts.reserve(kDetailPoints);std::array<Color,5> palette={Color{.40f,.39f,.36f},Color{.57f,.52f,.43f},Color{.64f,.59f,.49f},Color{.34f,.37f,.38f},Color{.72f,.65f,.52f}};
-    int made=0,tries=0;while(made<kDetailPoints&&tries<kDetailPoints*8){tries++;float x=(random()*2-1)*half,z=(random()*2-1)*half;float gx=std::round((x+half)/blockSize)*blockSize-half,gz=std::round((z+half)/blockSize)*blockSize-half;float dx=std::abs(x-gx),dz=std::abs(z-gz);if(!(dx<=11||dz<=11))continue;Color c=palette[randomU()%palette.size()];float shade=.78f+random()*.35f;pointVerts.push_back({x,.055f+random()*.01f,z,c.r*shade,c.g*shade,c.b*shade,.85f});made++;}
+    pointVerts.reserve(kDetailPoints);std::array<Color,5> palette={Color{.31f,.30f,.28f},Color{.36f,.34f,.30f},Color{.40f,.37f,.32f},Color{.28f,.29f,.29f},Color{.42f,.39f,.34f}};
+    int made=0,tries=0;while(made<kDetailPoints&&tries<kDetailPoints*8){tries++;float x=(random()*2-1)*half,z=(random()*2-1)*half;float gx=std::round((x+half)/blockSize)*blockSize-half,gz=std::round((z+half)/blockSize)*blockSize-half;float dx=std::abs(x-gx),dz=std::abs(z-gz);if(!(dx<=11||dz<=11))continue;Color c=palette[randomU()%palette.size()];float shade=.82f+random()*.16f;pointVerts.push_back({x,.055f+random()*.006f,z,c.r*shade,c.g*shade,c.b*shade,.62f});made++;}
     LOGI("World ready: buildings=%zu points=%zu",buildings.size(),pointVerts.size());
   }
 
@@ -340,11 +340,11 @@ class NativeGame {
     const Color panel{.035f,.055f,.075f,.90f},edge{.88f,.67f,.18f,.90f},white{.95f,.96f,.94f,1.f},gold{1.f,.80f,.25f,1.f};
     float shortSide=static_cast<float>(std::min(width,height));float uiPx=std::max(23.f,shortSide*.031f);float smallPx=std::max(18.f,shortSide*.024f);
     // Clean Arabic mission card on the left.
-    rectScreen(width*.025f,height*.045f,width*.39f,height*.18f,panel);rectScreen(width*.025f,height*.045f,width*.39f,3.f,edge);
-    drawArabicLine(frameVerts,"المهمة الحالية",width*.395f,height*.07f,uiPx,gold);
+    rectScreen(width*.025f,height*.045f,width*.335f,height*.165f,panel);rectScreen(width*.025f,height*.045f,width*.335f,3.f,edge);
+    drawArabicLine(frameVerts,"المهمة الحالية",width*.345f,height*.07f,uiPx,gold);
     std::string objectiveLine=objective.empty()?"استكشف المدينة وتحدث مع أهلها":objective;
     if(missionTotal>0)objectiveLine+="  "+arabicNumber(missionProgress)+" / "+arabicNumber(missionTotal);
-    drawArabicWrapped(frameVerts,objectiveLine,width*.395f,height*.12f,width*.36f,smallPx,white,2);
+    drawArabicWrapped(frameVerts,objectiveLine,width*.345f,height*.12f,width*.30f,smallPx,white,2);
     // Health, food and wallet panel.
     rectScreen(width*.69f,height*.045f,width*.285f,height*.205f,panel);rectScreen(width*.69f,height*.045f,width*.285f,3.f,edge);
     drawArabicLine(frameVerts,"الصحة  "+arabicNumber(static_cast<int>(health))+"٪",width*.955f,height*.07f,smallPx,white);
@@ -363,7 +363,7 @@ class NativeGame {
     drawArabicLine(frameVerts,dialogueOpen?"تابع":"تفاعل",width*.90f,height*.74f,smallPx,white);
     // Story dialogue card; every line uses the bundled Arabic font and RTL shaping.
     if(dialogueOpen&&!dialogPages.empty()){
-      float left=width*.235f,top=height*.465f,cardW=width*.53f,cardH=height*.275f;rectScreen(left,top,cardW,cardH,{.025f,.045f,.065f,.96f});rectScreen(left,top,cardW,4.f,edge);
+      float left=width*.255f,top=height*.485f,cardW=width*.49f,cardH=height*.245f;rectScreen(left,top,cardW,cardH,{.025f,.045f,.065f,.96f});rectScreen(left,top,cardW,4.f,edge);
       drawArabicLine(frameVerts,speakerName(),left+cardW-width*.018f,top+height*.022f,uiPx,gold);
       drawArabicWrapped(frameVerts,dialogPages[dialogPage],left+cardW-width*.022f,top+height*.074f,cardW-width*.045f,smallPx*1.08f,white,3);
       drawArabicLine(frameVerts,"اضغط تفاعل للمتابعة",left+cardW-width*.018f,top+cardH-height*.035f,std::max(17.f,smallPx*.78f),{.72f,.82f,.89f,1});
@@ -373,7 +373,7 @@ class NativeGame {
   }
   void render(){if(!ready||!app->window)return;eglQuerySurface(display,surface,EGL_WIDTH,&width);eglQuerySurface(display,surface,EGL_HEIGHT,&height);glViewport(0,0,width,height);glClearColor(.43f,.66f,.80f,1);glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
     float aspect=static_cast<float>(width)/std::max(1,height);V3 target={player.x,1.05f,player.z};float horiz=10.f*std::cos(cameraPitch);V3 eye={player.x-std::sin(cameraYaw)*horiz,player.y+2.8f+10.f*std::sin(cameraPitch),player.z-std::cos(cameraYaw)*horiz};M4 vp=multiply(perspective(62*kPi/180.f,aspect,.1f,1200.f),lookAt(eye,target,{0,1,0}));
-    if(!room){drawMesh(cityBuffer,cityVerts,vp,GL_TRIANGLES);drawMesh(detailBuffer,pointVerts,vp,GL_POINTS,2.1f);}
+    if(!room){drawMesh(cityBuffer,cityVerts,vp,GL_TRIANGLES);drawMesh(detailBuffer,pointVerts,vp,GL_POINTS,1.2f);}
     makeFrame();upload(frameBuffer,frameVerts,GL_DYNAMIC_DRAW);
     if(worldFrameCount>0)drawMesh(frameBuffer,frameVerts,vp,GL_TRIANGLES,1.f,0,worldFrameCount);
     glDisable(GL_DEPTH_TEST);drawMesh(frameBuffer,frameVerts,identity(),GL_TRIANGLES,1.f,worldFrameCount,frameVerts.size()-worldFrameCount,true);glEnable(GL_DEPTH_TEST);
