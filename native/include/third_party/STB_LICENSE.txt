@@ -1,0 +1,2 @@
+This file is public domain or MIT-licensed at the user's option.
+The stb_truetype.h header is from https://github.com/nothings/stb.

@@ -1,0 +1,3 @@
+DejaVu fonts are distributed under the Bitstream Vera license with DejaVu changes in the public domain.
+See https://dejavu-fonts.github.io/License.html
+Font: DejaVu Sans, obtained from the Debian DejaVu font package.
