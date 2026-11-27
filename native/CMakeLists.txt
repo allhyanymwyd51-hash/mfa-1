@@ -13,7 +13,8 @@ target_link_libraries(android_native_app_glue PUBLIC android log)
 
 add_library(mfa_native SHARED
     src/native_game.cpp
-    src/game_core.cpp)
+    src/game_core.cpp
+    src/model_asset.cpp)
 target_include_directories(mfa_native PRIVATE include "${NATIVE_APP_GLUE}")
 target_compile_options(mfa_native PRIVATE -O2 -Wall -Wextra -Wno-unused-parameter)
 target_link_libraries(mfa_native PRIVATE android log EGL GLESv2 android_native_app_glue)

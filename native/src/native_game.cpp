@@ -7,6 +7,7 @@
 #include <android_native_app_glue.h>
 #include <EGL/egl.h>
 #include <GLES2/gl2.h>
+#include "model_asset.h"
 
 #include <algorithm>
 #include <array>
@@ -46,6 +47,9 @@ M4 identity(){M4 m{};m.v[0]=m.v[5]=m.v[10]=m.v[15]=1;return m;}
 M4 multiply(const M4&a,const M4&b){M4 r{};for(int c=0;c<4;c++)for(int row=0;row<4;row++)for(int k=0;k<4;k++)r.v[c*4+row]+=a.v[k*4+row]*b.v[c*4+k];return r;}
 M4 perspective(float fov,float aspect,float nearZ,float farZ){M4 m{};float f=1.f/std::tan(fov*.5f);m.v[0]=f/aspect;m.v[5]=f;m.v[10]=(farZ+nearZ)/(nearZ-farZ);m.v[11]=-1;m.v[14]=(2*farZ*nearZ)/(nearZ-farZ);return m;}
 M4 lookAt(V3 eye,V3 center,V3 up){V3 f=norm(sub(center,eye)),s=norm(cross(f,up)),u=cross(s,f);M4 m=identity();m.v[0]=s.x;m.v[4]=s.y;m.v[8]=s.z;m.v[1]=u.x;m.v[5]=u.y;m.v[9]=u.z;m.v[2]=-f.x;m.v[6]=-f.y;m.v[10]=-f.z;m.v[12]=-dot(s,eye);m.v[13]=-dot(u,eye);m.v[14]=dot(f,eye);return m;}
+M4 translation(V3 p){M4 m=identity();m.v[12]=p.x;m.v[13]=p.y;m.v[14]=p.z;return m;}
+M4 scaling(V3 s){M4 m=identity();m.v[0]=s.x;m.v[5]=s.y;m.v[10]=s.z;return m;}
+M4 rotationYMatrix(float a){M4 m=identity();float c=std::cos(a),s=std::sin(a);m.v[0]=c;m.v[2]=-s;m.v[8]=s;m.v[10]=c;return m;}
 
 struct Vertex { float x{},y{},z{},r{},g{},b{},a{1.f},u{},v{}; };
 struct Color { float r{},g{},b{},a{1.f}; };
@@ -78,7 +82,8 @@ class NativeGame {
   android_app* app{};
   EGLDisplay display{EGL_NO_DISPLAY}; EGLSurface surface{EGL_NO_SURFACE}; EGLContext context{EGL_NO_CONTEXT};
   GLuint program{},cityBuffer{},detailBuffer{},frameBuffer{},fontTexture{};
-  GLint posLoc{-1},colorLoc{-1},uvLoc{-1},mvpLoc{-1},pointLoc{-1},texturedLoc{-1},fontLoc{-1};
+  GLint posLoc{-1},colorLoc{-1},uvLoc{-1},mvpLoc{-1},pointLoc{-1},texturedLoc{-1},fontLoc{-1},tintLoc{-1};
+  std::array<mfa::ModelAsset,3> buildingModels{},carModels{};bool assetModelsReady{};
   int width{1},height{1};bool ready{},focused{true},room{};int insideBuilding{-1},drivenCar{-1},dealerBuilding{-1};
   std::vector<Vertex> cityVerts,frameVerts,pointVerts;size_t worldFrameCount{};
   std::vector<Building> buildings;std::vector<Trash> trash;std::vector<NPC> npcs;std::vector<Car> cars;
@@ -95,6 +100,14 @@ class NativeGame {
   Color rndColor(Color a,Color b){float t=random();return {a.r+(b.r-a.r)*t,a.g+(b.g-a.g)*t,a.b+(b.b-a.b)*t};}
 
   GLuint shader(GLenum type,const char*src){GLuint s=glCreateShader(type);glShaderSource(s,1,&src,nullptr);glCompileShader(s);GLint ok=0;glGetShaderiv(s,GL_COMPILE_STATUS,&ok);if(!ok){char log[1024]{};glGetShaderInfoLog(s,sizeof(log),nullptr,log);LOGE("shader: %s",log);glDeleteShader(s);return 0;}return s;}
+  void loadGameModels(){
+    const char* buildingsPath[]={"models/city_building_small.glb","models/city_building_medium.glb","models/city_building_large.glb"};
+    const char* carsPath[]={"models/car_sedan.glb","models/car_suv.glb","models/car_taxi.glb"};
+    bool all=true;for(size_t i=0;i<buildingModels.size();i++){bool ok=mfa::loadGlbModel(app->activity->assetManager,buildingsPath[i],buildingModels[i]);LOGI("building model %s: %s",buildingsPath[i],ok?"loaded":"failed");all=all&&ok;}
+    for(size_t i=0;i<carModels.size();i++){bool ok=mfa::loadGlbModel(app->activity->assetManager,carsPath[i],carModels[i]);LOGI("vehicle model %s: %s",carsPath[i],ok?"loaded":"failed");all=all&&ok;}
+    assetModelsReady=all;
+  }
+  void releaseGameModels(){for(auto&m:buildingModels)mfa::releaseGlbModel(m);for(auto&m:carModels)mfa::releaseGlbModel(m);assetModelsReady=false;}
   bool initGL(){
     const EGLint attrs[]={EGL_RENDERABLE_TYPE,EGL_OPENGL_ES2_BIT,EGL_SURFACE_TYPE,EGL_WINDOW_BIT,EGL_BLUE_SIZE,8,EGL_GREEN_SIZE,8,EGL_RED_SIZE,8,EGL_ALPHA_SIZE,8,EGL_DEPTH_SIZE,16,EGL_NONE};
     display=eglGetDisplay(EGL_DEFAULT_DISPLAY);if(display==EGL_NO_DISPLAY||!eglInitialize(display,nullptr,nullptr))return false;
@@ -104,9 +117,10 @@ class NativeGame {
     if(context==EGL_NO_CONTEXT||surface==EGL_NO_SURFACE||!eglMakeCurrent(display,surface,surface,context))return false;
     eglSwapInterval(display,1);eglQuerySurface(display,surface,EGL_WIDTH,&width);eglQuerySurface(display,surface,EGL_HEIGHT,&height);
     const char*vs="attribute vec3 aPos; attribute vec4 aColor; attribute vec2 aUV; uniform mat4 uMvp; uniform float uPoint; varying vec4 vColor; varying vec2 vUV; void main(){gl_Position=uMvp*vec4(aPos,1.0);gl_PointSize=uPoint;vColor=aColor;vUV=aUV;}";
-    const char*fs="precision mediump float; varying vec4 vColor; varying vec2 vUV; uniform sampler2D uFont; uniform float uTextured; void main(){if(uTextured>0.5){float a=texture2D(uFont,vUV).a;gl_FragColor=vec4(vColor.rgb,vColor.a*a);}else{gl_FragColor=vColor;}}";
+    const char*fs="precision mediump float; varying vec4 vColor; varying vec2 vUV; uniform sampler2D uFont; uniform float uTextured; uniform vec4 uTint; void main(){if(uTextured>1.5){gl_FragColor=texture2D(uFont,vUV)*vColor*uTint;}else if(uTextured>0.5){float a=texture2D(uFont,vUV).a;gl_FragColor=vec4(vColor.rgb*uTint.rgb,vColor.a*uTint.a*a);}else{gl_FragColor=vColor*uTint;}}";
     GLuint a=shader(GL_VERTEX_SHADER,vs),b=shader(GL_FRAGMENT_SHADER,fs);program=glCreateProgram();glAttachShader(program,a);glAttachShader(program,b);glLinkProgram(program);glDeleteShader(a);glDeleteShader(b);GLint linked=0;glGetProgramiv(program,GL_LINK_STATUS,&linked);if(!linked)return false;
-    posLoc=glGetAttribLocation(program,"aPos");colorLoc=glGetAttribLocation(program,"aColor");uvLoc=glGetAttribLocation(program,"aUV");mvpLoc=glGetUniformLocation(program,"uMvp");pointLoc=glGetUniformLocation(program,"uPoint");texturedLoc=glGetUniformLocation(program,"uTextured");fontLoc=glGetUniformLocation(program,"uFont");
+    posLoc=glGetAttribLocation(program,"aPos");colorLoc=glGetAttribLocation(program,"aColor");uvLoc=glGetAttribLocation(program,"aUV");mvpLoc=glGetUniformLocation(program,"uMvp");pointLoc=glGetUniformLocation(program,"uPoint");texturedLoc=glGetUniformLocation(program,"uTextured");fontLoc=glGetUniformLocation(program,"uFont");tintLoc=glGetUniformLocation(program,"uTint");
+    loadGameModels();
     glGenBuffers(1,&cityBuffer);glGenBuffers(1,&detailBuffer);glGenBuffers(1,&frameBuffer);
     if(cityVerts.empty())buildWorld();
     upload(cityBuffer,cityVerts,GL_STATIC_DRAW);
@@ -147,7 +161,7 @@ class NativeGame {
   void drawArabicLine(std::vector<Vertex>&v,const std::string&s,float rightPx,float topPx,float pixelHeight,Color color){if(!fontReady||s.empty())return;auto cps=shapeArabic(utf8(s));float scale=pixelHeight/42.f,total=0;for(uint32_t cp:cps)if(cp){auto it=glyphs.find(cp);total+=it!=glyphs.end()?it->second.advance*scale:pixelHeight*.35f;}float cursor=rightPx-total,baseline=topPx+pixelHeight*.84f;for(int i=static_cast<int>(cps.size())-1;i>=0;i--){uint32_t cp=cps[i];if(!cp)continue;auto it=glyphs.find(cp);if(it==glyphs.end()){cursor+=pixelHeight*.35f;continue;}const Glyph&g=it->second;pushGlyph(v,cursor+g.xoff*scale,baseline+g.yoff*scale,g,scale,color);cursor+=g.advance*scale;}}
   void drawLatinLine(std::vector<Vertex>&v,const std::string&s,float leftPx,float topPx,float pixelHeight,Color color){if(!fontReady||s.empty())return;auto cps=utf8(s);float scale=pixelHeight/42.f,cursor=leftPx,baseline=topPx+pixelHeight*.84f;for(uint32_t cp:cps){auto it=glyphs.find(cp);if(it==glyphs.end()){cursor+=pixelHeight*.35f;continue;}const Glyph&g=it->second;pushGlyph(v,cursor+g.xoff*scale,baseline+g.yoff*scale,g,scale,color);cursor+=g.advance*scale;}}
   void drawArabicWrapped(std::vector<Vertex>&v,const std::string&s,float rightPx,float topPx,float maxWidth,float pixelHeight,Color color,int maxLines=3){std::vector<std::string>lines;std::string current,word;auto tooWide=[&](const std::string&t){return measureArabic(t)*(pixelHeight/42.f)>maxWidth;};for(char c:s){if(c==' '||c=='\n'){if(!word.empty()){std::string trial=current.empty()?word:current+" "+word;if(tooWide(trial)&&!current.empty()){lines.push_back(current);current=word;}else current=trial;word.clear();}if(c=='\n'&&!current.empty()){lines.push_back(current);current.clear();}}else word.push_back(c);}if(!word.empty()){std::string trial=current.empty()?word:current+" "+word;if(tooWide(trial)&&!current.empty()){lines.push_back(current);current=word;}else current=trial;}if(!current.empty())lines.push_back(current);if(static_cast<int>(lines.size())>maxLines)lines.resize(maxLines);for(size_t i=0;i<lines.size();i++)drawArabicLine(v,lines[i],rightPx,topPx+i*pixelHeight*1.35f,pixelHeight,color);}
-  void loseGL(){ready=false;if(display!=EGL_NO_DISPLAY){eglMakeCurrent(display,EGL_NO_SURFACE,EGL_NO_SURFACE,EGL_NO_CONTEXT);if(context!=EGL_NO_CONTEXT)eglDestroyContext(display,context);if(surface!=EGL_NO_SURFACE)eglDestroySurface(display,surface);eglTerminate(display);}display=EGL_NO_DISPLAY;context=EGL_NO_CONTEXT;surface=EGL_NO_SURFACE;}
+  void loseGL(){ready=false;if(display!=EGL_NO_DISPLAY){releaseGameModels();eglMakeCurrent(display,EGL_NO_SURFACE,EGL_NO_SURFACE,EGL_NO_CONTEXT);if(context!=EGL_NO_CONTEXT)eglDestroyContext(display,context);if(surface!=EGL_NO_SURFACE)eglDestroySurface(display,surface);eglTerminate(display);}display=EGL_NO_DISPLAY;context=EGL_NO_CONTEXT;surface=EGL_NO_SURFACE;}
   void setObjective(std::string text,float x=0,float z=0,bool marker=false){objective=std::move(text);missionTarget={x,0,z};missionTargetVisible=marker;}
   void toast(std::string text){toastText=std::move(text);toastTime=3.f;}
   void showDialog(int speaker,std::vector<std::string>pages,int after){dialogSpeaker=speaker;dialogPages=std::move(pages);dialogAction=after;dialogPage=0;dialogueOpen=true;}
@@ -182,21 +196,17 @@ class NativeGame {
     // 144 buildings. Front doors, shop awnings, window bands and rooftop tanks.
     for(int ix=0;ix<kBlocks;ix++)for(int iz=0;iz<kBlocks;iz++){
       float x=-half+ix*blockSize+blockSize*.5f,z=-half+iz*blockSize+blockSize*.5f;
-      bool dealer=(ix==5&&iz==6);bool shop=((ix+iz)%3==0)||dealer;float w=dealer?32.f:25+random()*8,d=dealer?30.f:25+random()*8,h=dealer?10.f:(shop?7.5f:12+random()*36);
+      bool dealer=(ix==5&&iz==6);bool shop=((ix+iz)%3==0)||dealer;float w=dealer?32.f:25+random()*8,d=dealer?30.f:25+random()*8,h=dealer?18.f:(shop?18.f:std::max(18.f,12+random()*36));
       Color c=dealer?Color{.22f,.29f,.34f}:(shop?rndColor({.56f,.32f,.20f},{.83f,.68f,.43f}):rndColor({.49f,.48f,.44f},{.79f,.73f,.61f}));
-      buildings.push_back({x,z,w,d,h,c,shop,dealer});if(dealer)dealerBuilding=static_cast<int>(buildings.size()-1);box(cityVerts,{x,h*.5f,z},{w,h,d},c);
-      box(cityVerts,{x,h+.22f,z},{w+.5f,.44f,d+.5f},{.31f,.30f,.28f});
-      const int rows=shop?1:std::max(2,static_cast<int>(h/5.0f));
-      for(int side:{-1,1})for(int r=0;r<rows;r++)for(int col=0;col<4;col++){
-        float wx=x+(col-1.5f)*w*.19f,wy=2.2f+r*(h-3.f)/rows;
-        box(cityVerts,{wx,wy,z+side*(d*.5f+.035f)},{w*.10f,1.25f,.06f},random()<.52f?Color{.25f,.40f,.48f}:Color{.76f,.64f,.42f});
-        box(cityVerts,{x+side*(w*.5f+.035f),wy,z+(col-1.5f)*d*.19f},{.06f,1.25f,d*.10f},{.28f,.41f,.47f});
+      buildings.push_back({x,z,w,d,h,c,shop,dealer});if(dealer)dealerBuilding=static_cast<int>(buildings.size()-1);
+      if(!assetModelsReady){
+        box(cityVerts,{x,h*.5f,z},{w,h,d},c);box(cityVerts,{x,h+.22f,z},{w+.5f,.44f,d+.5f},{.31f,.30f,.28f});
+        const int rows=shop?1:std::max(2,static_cast<int>(h/5.0f));
+        for(int side:{-1,1})for(int r=0;r<rows;r++)for(int col=0;col<4;col++){float wx=x+(col-1.5f)*w*.19f,wy=2.2f+r*(h-3.f)/rows;box(cityVerts,{wx,wy,z+side*(d*.5f+.035f)},{w*.10f,1.25f,.06f},random()<.52f?Color{.25f,.40f,.48f}:Color{.76f,.64f,.42f});box(cityVerts,{x+side*(w*.5f+.035f),wy,z+(col-1.5f)*d*.19f},{.06f,1.25f,d*.10f},{.28f,.41f,.47f});}
+        box(cityVerts,{x+w*.28f,h+.85f,z-d*.2f},{2.2f,1.5f,2.2f},{.35f,.39f,.39f});
       }
-      // Door and colored shop canopy.
-
       if(shop)box(cityVerts,{x,dealer?5.25f:4.25f,z+d*.5f+.14f},{w*.72f,.9f,.28f},dealer?Color{.72f,.12f,.07f}:rndColor({.54f,.10f,.07f},{.10f,.38f,.24f}));
       if(dealer){box(cityVerts,{x,7.1f,z+d*.5f+.24f},{w*.63f,1.1f,.16f},{.18f,.52f,.58f});box(cityVerts,{x,3.8f,z+d*.5f+6.f},{22,.15f,10},{.22f,.24f,.25f});for(int k=0;k<3;k++)box(cityVerts,{x-6.f+k*6.f,.55f,z+d*.5f+5.f},{2.1f,.75f,4.2f},k==1?Color{.76f,.09f,.05f}:Color{.20f,.37f,.52f});}
-      box(cityVerts,{x+w*.28f,h+.85f,z-d*.2f},{2.2f,1.5f,2.2f},{.35f,.39f,.39f});
     }
     // Park strip, palms and streetlights.
     box(cityVerts,{0,.015f,-half+32},{41,.07f,41},{.20f,.42f,.19f});
@@ -208,7 +218,7 @@ class NativeGame {
         for(int l=0;l<6;l++){float a=l*kPi/3;V3 c0{x+std::sin(a)*1.05f,5.2f,z+std::cos(a)*1.05f};box(cityVerts,c0,{.44f,.18f,2.5f},{.13f,.34f,.13f},a);}
       }
     }
-    // Parked cars and traffic vehicles with simple colored bodies/cabins.
+    // Parked and traffic vehicle instances; GLB assets replace placeholder box models when available.
     for(int i=0;i<32;i++){
       bool horizontal=random()<.5f;int idx=static_cast<int>(random()*(kBlocks+1));float p=-half+idx*blockSize;
       float along=-half+random()*kCity;float lane=(random()<.5f?-1.f:1.f)*5.2f;
@@ -229,13 +239,16 @@ class NativeGame {
       float x,z;int attempts=0;do{x=-half+random()*kCity;z=-half+random()*kCity;attempts++;}while(attempts<100&&std::abs(x-std::round((x+half)/blockSize)*blockSize+half)>13&&std::abs(z-std::round((z+half)/blockSize)*blockSize+half)>13);
       trash.push_back({x,z,true});
     }
-    // Exactly 120,000 visible surface detail points, one GL_POINTS draw call.
+    // Restrained road micro-detail; the earlier dense point field looked like white static.
     pointVerts.reserve(kDetailPoints);std::array<Color,5> palette={Color{.31f,.30f,.28f},Color{.36f,.34f,.30f},Color{.40f,.37f,.32f},Color{.28f,.29f,.29f},Color{.42f,.39f,.34f}};
     int made=0,tries=0;while(made<kDetailPoints&&tries<kDetailPoints*8){tries++;float x=(random()*2-1)*half,z=(random()*2-1)*half;float gx=std::round((x+half)/blockSize)*blockSize-half,gz=std::round((z+half)/blockSize)*blockSize-half;float dx=std::abs(x-gx),dz=std::abs(z-gz);if(!(dx<=11||dz<=11))continue;Color c=palette[randomU()%palette.size()];float shade=.82f+random()*.16f;pointVerts.push_back({x,.055f+random()*.006f,z,c.r*shade,c.g*shade,c.b*shade,.62f});made++;}
     LOGI("World ready: buildings=%zu points=%zu",buildings.size(),pointVerts.size());
   }
 
-  void drawMesh(GLuint buffer,const std::vector<Vertex>&v,const M4&m,GLenum primitive,float pointSize=1.f,size_t first=0,size_t count=static_cast<size_t>(-1),bool textured=false){if(v.empty()||first>=v.size())return;count=std::min(count,v.size()-first);glUseProgram(program);glBindBuffer(GL_ARRAY_BUFFER,buffer);glEnableVertexAttribArray(posLoc);glEnableVertexAttribArray(colorLoc);glEnableVertexAttribArray(uvLoc);glVertexAttribPointer(posLoc,3,GL_FLOAT,GL_FALSE,sizeof(Vertex),reinterpret_cast<void*>(offsetof(Vertex,x)));glVertexAttribPointer(colorLoc,4,GL_FLOAT,GL_FALSE,sizeof(Vertex),reinterpret_cast<void*>(offsetof(Vertex,r)));glVertexAttribPointer(uvLoc,2,GL_FLOAT,GL_FALSE,sizeof(Vertex),reinterpret_cast<void*>(offsetof(Vertex,u)));glUniformMatrix4fv(mvpLoc,1,GL_FALSE,m.v);glUniform1f(pointLoc,pointSize);glUniform1f(texturedLoc,textured?1.f:0.f);glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,fontTexture);glUniform1i(fontLoc,0);glDrawArrays(primitive,static_cast<GLint>(first),static_cast<GLsizei>(count));}
+  void drawMesh(GLuint buffer,const std::vector<Vertex>&v,const M4&m,GLenum primitive,float pointSize=1.f,size_t first=0,size_t count=static_cast<size_t>(-1),bool textured=false){if(v.empty()||first>=v.size())return;count=std::min(count,v.size()-first);glUseProgram(program);glBindBuffer(GL_ARRAY_BUFFER,buffer);glEnableVertexAttribArray(posLoc);glEnableVertexAttribArray(colorLoc);glEnableVertexAttribArray(uvLoc);glVertexAttribPointer(posLoc,3,GL_FLOAT,GL_FALSE,sizeof(Vertex),reinterpret_cast<void*>(offsetof(Vertex,x)));glVertexAttribPointer(colorLoc,4,GL_FLOAT,GL_FALSE,sizeof(Vertex),reinterpret_cast<void*>(offsetof(Vertex,r)));glVertexAttribPointer(uvLoc,2,GL_FLOAT,GL_FALSE,sizeof(Vertex),reinterpret_cast<void*>(offsetof(Vertex,u)));glUniformMatrix4fv(mvpLoc,1,GL_FALSE,m.v);glUniform1f(pointLoc,pointSize);glUniform1f(texturedLoc,textured?1.f:0.f);glUniform4f(tintLoc,1,1,1,1);glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,fontTexture);glUniform1i(fontLoc,0);glDrawArrays(primitive,static_cast<GLint>(first),static_cast<GLsizei>(count));}
+  void drawModel(const mfa::ModelAsset&asset,const M4&vp,V3 position,V3 scale,float yaw,Color tint={1,1,1,1}){if(!asset.valid)return;M4 local=translation({-asset.originX,-asset.originY,-asset.originZ});M4 world=multiply(translation(position),multiply(rotationYMatrix(yaw),multiply(scaling(scale),local)));M4 mvp=multiply(vp,world);glUseProgram(program);glUniformMatrix4fv(mvpLoc,1,GL_FALSE,mvp.v);glUniform1f(pointLoc,1.f);glUniform4f(tintLoc,tint.r,tint.g,tint.b,tint.a);glUniform1i(fontLoc,0);glActiveTexture(GL_TEXTURE0);glEnableVertexAttribArray(posLoc);glEnableVertexAttribArray(colorLoc);glEnableVertexAttribArray(uvLoc);for(const auto&part:asset.primitives){if(!part.buffer||part.vertexCount<=0)continue;glBindBuffer(GL_ARRAY_BUFFER,part.buffer);glVertexAttribPointer(posLoc,3,GL_FLOAT,GL_FALSE,sizeof(mfa::ModelVertex),reinterpret_cast<void*>(offsetof(mfa::ModelVertex,x)));glVertexAttribPointer(colorLoc,4,GL_FLOAT,GL_FALSE,sizeof(mfa::ModelVertex),reinterpret_cast<void*>(offsetof(mfa::ModelVertex,r)));glVertexAttribPointer(uvLoc,2,GL_FLOAT,GL_FALSE,sizeof(mfa::ModelVertex),reinterpret_cast<void*>(offsetof(mfa::ModelVertex,u)));glBindTexture(GL_TEXTURE_2D,part.texture);glUniform1f(texturedLoc,part.textured?2.f:0.f);glDrawArrays(GL_TRIANGLES,0,part.vertexCount);}}
+  void drawCityModels(const M4&vp){if(!assetModelsReady)return;for(size_t i=0;i<buildings.size();i++){const Building&b=buildings[i];if(distance(player.x,player.z,b.x,b.z)>165.f)continue;size_t index=(i*7+i/3)%buildingModels.size();const auto&model=buildingModels[index];float scale=index==0?1.72f:index==1?1.42f:1.23f;scale*=.90f+static_cast<float>(i%5)*.05f;drawModel(model,vp,{b.x,0,b.z},{scale,scale,scale},0.f);}}
+  void drawCarModels(const M4&vp){if(!assetModelsReady)return;for(size_t i=0;i<cars.size();i++){const Car&c=cars[i];if(distance(player.x,player.z,c.x,c.z)>190.f)continue;size_t index=c.owned?0:(c.traffic?(i%2==0?2:1):(i%2));Color tint=c.owned?Color{1.f,.68f,.62f,1.f}:Color{1,1,1,1};drawModel(carModels[index],vp,{c.x,0,c.z},{1.f,.82f,1.f},c.yaw,tint);}}
   bool collides(float x,float z){for(const auto&b:buildings){float r=.65f;if(x+r>b.x-b.w*.5f&&x-r<b.x+b.w*.5f&&z+r>b.z-b.d*.5f&&z-r<b.z+b.d*.5f)return true;}return false;}
   float distance(float x,float z,float a,float b){return std::sqrt((x-a)*(x-a)+(z-b)*(z-b));}
   int nearestCar(){int best=-1;float bd=3.5f;for(int i=0;i<static_cast<int>(cars.size());i++){if(cars[i].traffic)continue;float d=distance(player.x,player.z,cars[i].x,cars[i].z);if(d<bd){bd=d;best=i;}}return best;}
@@ -326,9 +339,10 @@ class NativeGame {
   void addWorldMarker(){if(!missionTargetVisible||room)return;float spin=walkPhase*.3f;for(int i=0;i<12;i++){float a=spin+i*kPi/6.f;box(frameVerts,{missionTarget.x+std::cos(a)*1.35f,.12f,missionTarget.z+std::sin(a)*1.35f},{.34f,.08f,.12f},{.98f,.73f,.10f},-a);}box(frameVerts,{missionTarget.x,1.1f,missionTarget.z},{.22f,2.1f,.22f},{.98f,.72f,.08f});sphere(frameVerts,{missionTarget.x,2.25f+std::sin(walkPhase)*.12f,missionTarget.z},{.42f,.42f,.42f},{1.f,.82f,.20f},0,7,10);}
   void makeFrame(){
     frameVerts.clear();if(room)addRoom(frameVerts);
+    if(assetModelsReady&&!room)for(const auto&b:buildings)if(distance(player.x,player.z,b.x,b.z)>165.f)box(frameVerts,{b.x,b.h*.5f,b.z},{b.w,b.h,b.d},b.color);
     if(drivenCar<0)addPerson(frameVerts,player.x,player.z,walkPhase,{.88f,.87f,.80f},true,-1,playerY);
     for(const auto&n:npcs){if(n.identity==3&&passengerOnboard)continue;addPerson(frameVerts,n.x,n.z,n.phase,n.shirt,false,n.identity);}
-    for(const auto&c:cars)addCar(frameVerts,c,drivenCar>=0);
+    if(!assetModelsReady)for(const auto&c:cars)addCar(frameVerts,c,drivenCar>=0);
     if(!room){
       for(const auto&t:trash)if(t.alive){Color waste{.51f,.74f,.34f};box(frameVerts,{t.x,.13f,t.z},{.19f,.28f,.18f},waste,walkPhase*.04f);cylinderBetween(frameVerts,{t.x,.25f,t.z},{t.x,.40f,t.z},.055f,.05f,{.67f,.82f,.58f},7);}
       for(int i=0;i<static_cast<int>(buildings.size());i++){const auto&b=buildings[i];if(distance(player.x,player.z,b.x,b.z+b.d*.5f)<28){float angle=(pendingEnter&&insideBuilding==i)?-doorAnim*1.45f:0.f;box(frameVerts,{b.x,1.15f,b.z+b.d*.5f+.12f},{2.1f,2.3f,.16f},{.30f,.20f,.12f},angle);}}
@@ -373,7 +387,7 @@ class NativeGame {
   }
   void render(){if(!ready||!app->window)return;eglQuerySurface(display,surface,EGL_WIDTH,&width);eglQuerySurface(display,surface,EGL_HEIGHT,&height);glViewport(0,0,width,height);glClearColor(.43f,.66f,.80f,1);glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
     float aspect=static_cast<float>(width)/std::max(1,height);V3 target={player.x,1.05f,player.z};float horiz=10.f*std::cos(cameraPitch);V3 eye={player.x-std::sin(cameraYaw)*horiz,player.y+2.8f+10.f*std::sin(cameraPitch),player.z-std::cos(cameraYaw)*horiz};M4 vp=multiply(perspective(62*kPi/180.f,aspect,.1f,1200.f),lookAt(eye,target,{0,1,0}));
-    if(!room){drawMesh(cityBuffer,cityVerts,vp,GL_TRIANGLES);drawMesh(detailBuffer,pointVerts,vp,GL_POINTS,1.2f);}
+    if(!room){drawMesh(cityBuffer,cityVerts,vp,GL_TRIANGLES);if(assetModelsReady){drawCityModels(vp);drawCarModels(vp);}drawMesh(detailBuffer,pointVerts,vp,GL_POINTS,1.2f);}
     makeFrame();upload(frameBuffer,frameVerts,GL_DYNAMIC_DRAW);
     if(worldFrameCount>0)drawMesh(frameBuffer,frameVerts,vp,GL_TRIANGLES,1.f,0,worldFrameCount);
     glDisable(GL_DEPTH_TEST);drawMesh(frameBuffer,frameVerts,identity(),GL_TRIANGLES,1.f,worldFrameCount,frameVerts.size()-worldFrameCount,true);glEnable(GL_DEPTH_TEST);
